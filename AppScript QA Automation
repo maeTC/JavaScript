@@ -1,0 +1,168 @@
+//* 
+During my internship at Net Conversion,I was tasked with a biweekly QA of a very mesy, extensive spreadsheet. This was a very repeptitive task that took ~4hrs each time.
+I wrote this Google App Script to automate the process and reduce the possibility of human error. 
+
+## How to Use:
+- Delete column P and all of the numbers you want to check before running a new QA - The script will overwrite existing cell values, but don't do that
+- Hit the refresh QA button and input start row. If you don't need to QA all of the data, hit cancel on the 'running script' box when your data has filled
+- If blank rows pull in, that flowchart row doesn't exist. If it corresponds to a row of all zeroes in the budget, this will show up as correct (not red)
+- If Brand/Branch names are changed, the taxonomy lookup table at the very bottom needs to be updated, the rest will automatically update
+
+## Repurposing:
+- you are basically doing a fancy lookup, so you will have to edit the locations of the target and source cells where your data lives
+- ensure conditional formatting is correct
+     - eg: Color cell red when Custom Formula=(ABS(Y2-J2)>1) This matches column Y to J in your QA sheet allowing for a $1 margin of error
+- curently this is very inefficient due to too many arrays being stored and looped thru.
+- The more standardized you can make your flowchart the better:
+           - identify mediums by cell location instead of searching for them
+           - minimize merged cells :)
+           - Name sheets using taxonomy that matches the fluid gross budget
+        
+
+
+
+
+//adds menu buttons
+function onOpen()
+{
+
+
+ const sheetui = SpreadsheetApp.getUi();
+ const menu = sheetui.createMenu('Refresh QA');
+ menu.addItem('Fill QA Data', 'runHorizontal')
+ menu.addItem('Fill One-Time Data', 'runOneTime')
+   .addToUi();
+}
+
+
+//Execution Function
+function runHorizontal()
+{
+ //Pop-up box to input start row
+ const sheetui = SpreadsheetApp.getUi();
+ const prompt = sheetui.prompt('Enter Starting Row:','provide the row number where you want to start filling data.',SpreadsheetApp.getUi().ButtonSet.OK_CANCEL);
+   const startrow = parseInt(prompt.getResponseText());
+   //verify input is valid
+   if (!isNaN(startrow))
+   { // run QA
+     fillFlowData(startrow);
+   }
+   else
+   {
+     sheetui.alert('Invalid input. Please enter a valid number.');
+   }
+}
+
+
+
+
+//filling HAP sheet budget numbers into GW budgetmaster QA sheet
+function fillFlowData(startrow)
+{
+  // Reference this sheet (Flowchart Digital QA):
+ const sourceSheet = SpreadsheetApp.getActiveSheet();
+ // HAPs 2.0 sheet:
+ const targetSpreadsheet = SpreadsheetApp.openByUrl('https://docs.google.com/spreadsheets/d/1lz6hHQKTck4yHJbCr2FZe2EeDTEXzHe-6PX95CIi5Nw/edit?gid=934409514#gid=934409514');
+ let sheetName = "";
+ //get brand+branch string from Column Q in shource sheet
+ //Retreive first brand+branch flowchart sheet
+ let brandBranch = sourceSheet.getSheetValues(startrow,17,1,1);
+
+
+ // Outer Loop through each row in the QA sheet
+ // i keeps track of the rows in the QA sheet 
+ for (let i =startrow; i < 346; i++)
+ {
+   console.log(i+": starting loop "+brandBranch);
+   sheetName = brandBranch;
+   //match branch name from source sheet to flowchart
+   let targetSheet = targetSpreadsheet.getSheetByName(sheetName);
+   //error message in column P if branch doesn't have a flowchart, move to next row
+   if (!targetSheet || sheetName == "")
+   {
+     sourceSheet.getRange(i, 16).setValue('ERROR: '+brandBranch+' not found');
+     brandBranch = sourceSheet.getSheetValues(i+1,17,1,1);
+     continue;
+   }
+   console.log("target sheet located:"+targetSheet.getSheetName())
+   //get flowchart column B (source/medium)
+   let flowArrayB = getColumnB(targetSheet);
+  
+       //stay on the same flowchart sheet while the next row of the QA sheet is the same branch as the previous row. Each interation fills in one medium row
+       while(sheetName.toString()==brandBranch.toString())
+       {
+         // get digital medium from column B of QA sheet
+         let medium = sourceSheet.getSheetValues(i,2,1,1);
+         //looping thru flowchat column B to go through all the mediums for this branch
+         //med = binarySearch(flowArrayB,medium.toString());
+         console.log("source medium: "+medium);
+         //j is the rows in the flowchart - make sure all the mediums you want are within this range
+         for(let j=26; j<100; j++)
+         {
+        
+           //check if jth row in flowchart matches medium
+           if(flowArrayB[j]== medium)
+           {
+             console.log("spend row located");
+             //console.log(getCellFillColor(targetSheet,'B(j+1)'))
+             //get the entire row of spend for this medium (3 rows down)
+             let values = targetSheet.getRange(j+4,2,1,54);
+             //transform row into 2d array representing the merged cells
+             //make sure they are in order from Jan-Dec
+             let mergedCells = sortMergedCellsByColumn(values.getMergedRanges());
+             //loop through the merged cells aka months
+             let k =0
+             while(k<12)
+             {
+                 //set spend to kth merged cell as an array of it's columns
+                 let spend = mergedCells[k].getDisplayValues();
+                 //spend is a 1D array with the $ we need at index 0
+                 console.log(spend[0]);
+                 //finds the appropriate column in the QA sheet to put the spend
+                 sourceSheet.getRange(i, k+18).setValue(spend[0]);
+               //increment month index
+               k++;
+             }
+             break;
+           }
+         }
+         //get name of branch from next row to see if while loop should continue
+         brandBranch = sourceSheet.getSheetValues(i+1,17,1,1);
+        
+         //move to next row
+         i++;
+         //console.log('end of while loop. Moving to row '+i+' branch: '+ brandBranch+ '. sheetName = ' + sheetName);
+       }
+       i--;
+ }    
+}
+
+
+//return column B values in a 1D array
+function getColumnB(sheet)
+{
+ const values = sheet.getDataRange().getValues();
+ return values.map(row => row[1]);
+ }
+
+
+//sorts an array of merged cells from left to right
+function sortMergedCellsByColumn(mergedCells)
+{
+ return mergedCells.sort((a, b) =>
+ {
+   const aStartColumn = a.getColumn();
+   const bStartColumn = b.getColumn();
+   return aStartColumn - bStartColumn;
+ });
+}
+
+
+//working on shortening flowArrayB by identifying relevant cells containing mediums that are light grey
+function getCellFillColor(sheetName, cellReference)
+{
+ const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+ const cell = sheet.getRange(cellReference);
+ const fillColor = cell.getInterior().getColor();
+ return fillColor;
+}
